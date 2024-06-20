@@ -16,6 +16,7 @@ library(knitr)
 
 # set plot theme
 theme_set(theme_bw())
+setwd("//wsl.localhost/Ubuntu/home/v-wangjen/jenny_projects/coursework/week3")
 ```
 
 # Load and preview data
@@ -35,31 +36,69 @@ head(ratings) %>% kable()
 
 ```{r dist-ratings}
 # plot the distribution of rating values https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=26
+# plot the distribution of rating values
 ```
+ratings %>%
+  ggplot(aes(x = rating)) +
+  geom_histogram(binwidth = 0.5, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Rating Values",
+       x = "Rating",
+       y = "Count")
 
 ## Per-movie stats
 
 ```{r aggregate-by-movie}
 # aggregate ratings by movie, computing mean rating and number of ratings
 # hint: use the n() function for easy counting within a group
+ratings_agg <- ratings %>%
+  group_by(movie_id) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n())
 ```
 
 ```{r dist-movie-popularity}
 # plot distribution of movie popularity (= number of ratings the movie received)
 # hint: try scale_x_log10() for a logarithmic x axis
+
+ratings_agg %>%
+  ggplot(aes(x = num_ratings)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  scale_x_log10() +
+  labs(title = "Distribution of Movie Popularity",
+       x = "Number of Ratings",
+       y = "Count")
+
 ```
 
 ```{r dist-mean-ratings-by-movie}
 # plot distribution of mean ratings by movie https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=28
 # hint: try geom_histogram and geom_density
+# plot distribution of mean ratings by movie
+ratings_agg %>%
+  ggplot(aes(x = mean_rating)) +
+  geom_histogram(binwidth = 0.5, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Mean Ratings by Movie",
+       x = "Mean Rating",
+       y = "Count")
 ```
 
 ```{r cdf-movie-pop}
-# rank movies by popularity (number of ratings) and compute the cdf, or fraction of all views covered by the top-k movies https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=30
+# rank movies by popularity (number of ratings) and compute the cdf, or fraction of all views covered by the top-k movies
 # hint: use dplyr's rank and arrange functions, and the base R sum and cumsum functions
 # store the result in a new data frame so you can use it in creating figure 2 from the paper below
 
-# plot the CDF of movie popularity
+# Rank movies by popularity
+movies_ranked <- ratings_agg %>%
+  arrange(desc(num_ratings)) %>%
+  mutate(cumulative_views = cumsum(num_ratings),
+         cdf = cumulative_views / sum(num_ratings))
+
+# Plot the CDF of movie popularity
+ggplot(movies_ranked, aes(x = num_ratings, y = cdf)) +
+  geom_line() +
+  labs(title = "CDF of Movie Popularity",
+       x = "Number of Ratings",
+       y = "CDF")
 ```
 
 
@@ -67,11 +106,21 @@ head(ratings) %>% kable()
 
 ```{r aggregate-by-user}
 # aggregate ratings by user, computing mean and number of ratings
-```
+user_agg <- ratings %>%
+  group_by(user_id) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n())
 
 ```{r dist-user-activity}
 # plot distribution of user activity (= number of ratings the user made)
 # hint: try a log scale here
+user_agg %>%
+  ggplot(aes(x = num_ratings)) +
+  geom_histogram(binwidth = 1, fill = "steelblue", color = "white") +
+  scale_x_log10() +
+  labs(title = "Distribution of User Activity",
+       x = "Number of Ratings",
+       y = "Count")
 ```
 
 # Anatomy of the long tail

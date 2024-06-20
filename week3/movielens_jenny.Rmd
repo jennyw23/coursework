@@ -1,0 +1,237 @@
+---
+title: "Movielens"
+date: '`r Sys.time()`'
+output:
+  html_document:
+    #code_folding: hide
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+---
+
+```{r setup, include=FALSE}
+library(scales)
+library(tidyverse)
+library(knitr)
+
+# set plot theme
+theme_set(theme_bw())
+```
+
+# Load and preview data
+
+Read data from the `ratings.csv` file
+```{r load-data}
+setwd("//wsl.localhost/Ubuntu/home/v-wangjen/jenny_projects/coursework/week3")
+ratings <- read_csv('ratings.csv',
+                    col_names = c('user_id','movie_id','rating','timestamp'))
+```
+
+Loaded `r format(object.size(ratings), units="Mb")` of ratings data, containing `r format(nrow(ratings), big.mark = ",")` ratings. Here's a preview:
+```{r preview-data}
+head(ratings) %>% kable()
+```
+
+# Summary statistics
+
+```{r dist-ratings}
+# plot the distribution of rating values https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=26
+
+ratings %>%
+  ggplot(aes(x = rating)) +
+  geom_histogram(fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Rating Values",
+       x = "Rating",
+       y = "Count")
+```
+
+
+
+## Per-movie stats
+
+```{r aggregate-by-movie}
+# aggregate ratings by movie, computing mean rating and number of ratings
+# hint: use the n() function for easy counting within a group
+
+ratings_agg <- ratings %>%
+  group_by(movie_id) %>%
+  summarise(mean_rating = mean(rating),
+            num_ratings = n())
+
+head(ratings_agg)
+
+summary(ratings_agg)
+```
+
+```{r dist-movie-popularity}
+# plot distribution of movie popularity (= number of ratings the movie received)
+# hint: try scale_x_log10() for a logarithmic x axis
+
+ratings_agg %>%
+  ggplot(aes(x = num_ratings)) +
+  geom_histogram(fill = "steelblue", color = "white") +
+  scale_x_log10() +
+  labs(title = "Distribution of Movie Popularity",
+       x = "Number of Ratings",
+       y = "Count")
+```
+
+```{r dist-mean-ratings-by-movie}
+# plot distribution of mean ratings by movie https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=28
+# hint: try geom_histogram and geom_density
+
+ratings_agg %>%
+  ggplot(aes(x = mean_rating)) +
+  geom_density(binwidth = 0.5, fill = "steelblue", color = "white") +
+  labs(title = "Distribution of Mean Ratings by Movie",
+       x = "Mean Rating",
+       y = "Count")
+```
+
+```{r cdf-movie-pop}
+# rank movies by popularity (number of ratings) and compute the cdf, or fraction of all views covered by the top-k movies https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=30
+# hint: use dplyr's rank and arrange functions, and the base R sum and cumsum functions
+# store the result in a new data frame so you can use it in creating figure 2 from the paper below
+
+# plot the CDF of movie popularity
+
+# Rank movies by popularity
+movies_ranked <- ratings_agg %>%
+  arrange(desc(num_ratings)) %>%
+  mutate(cumulative_views = cumsum(num_ratings),
+         rank = rank(row_number()),
+         cdf = cumulative_views / sum(num_ratings))
+
+# Plot the CDF of movie popularity
+ggplot(movies_ranked, aes(x = rank, y = cdf)) +
+  geom_line() +
+  labs(title = "CDF of Movie Popularity",
+       x = "Number of Ratings",
+       y = "CDF")
+```
+
+
+# Per-user stats
+
+```{r aggregate-by-user}
+# aggregate ratings by user, computing mean and number of ratings
+
+user_agg <- ratings %>% 
+  group_by(user_id) %>% 
+  summarize(mean=mean(rating),
+            num_ratings=n())
+
+```
+
+```{r dist-user-activity}
+# plot distribution of user activity (= number of ratings the user made)
+# hint: try a log scale here
+
+user_agg %>%
+  ggplot(aes(x = num_ratings)) +
+  geom_histogram(fill = "steelblue", color = "white") +
+  scale_x_log10() +
+  labs(title = "Distribution of User Activity",
+       x = "Number of Ratings",
+       y = "Count")
+
+
+```
+
+# Anatomy of the long tail
+
+```{r long-tail}
+# generate the equivalent of figure 2a of this paper:
+# note: don't worry about the "null model" lines
+# just do the solid lines and dotted line (optional)
+# https://5harad.com/papers/long_tail.pdf
+
+# Specifically, for the subset of users who rated at least 10 movies,
+# produce a plot that shows the fraction of users satisfied (vertical
+# axis) as a function of inventory size (horizontal axis). We will
+# define "satisfied" as follows: an individual user is satisfied p% of
+# the time at inventory of size k if at least p% of the movies they
+# rated are contained in the top k most popular movies. As in the
+# paper, produce one curve for the 100% user satisfaction level and
+# another for 90%---do not, however, bother implementing the null
+# model (shown in the dashed lines).
+
+# compute the number of ratings for each movie
+# and translate this to a rank
+# breaking ties arbitrarily at random
+# (although other rankings are fine, too)
+movie_pop <- ratings %>%
+  group_by(movie_id) %>%
+  summarize(num_ratings = n()) %>%
+  ungroup() %>%
+  arrange(desc(num_ratings)) %>%
+  mutate(rank = 1:n())
+
+
+# limit to users who have rated at least 10 movies
+# as specified in the homework question
+ratings <- ratings %>%
+  group_by(user_id) %>%
+  filter(n() >= 10)
+
+# join the ratings table with popularity ranks
+ratings_with_ranks <- inner_join(ratings, movie_pop)
+# check that we didn't drop rows
+# stopifnot( nrow(anti_join(ratings, movie_pop)) == 0 )
+
+# compute the 90% and 100% satisfaction cutoffs for each user
+# the 90% cutoff is just the rank at which 90% of the user's rated movies are covered
+# likewise, the 100% cutoff is the rank of the least popular movie the user rated
+
+# note: an alternative way to do this, slightly slower in practice
+user_cutoffs <- ratings_with_ranks %>%
+   group_by(user_id) %>%
+   summarize(cutoff_90 = quantile(rank, 0.9),
+          cutoff_100 = quantile(rank, 1.0)) %>%
+   ungroup()
+
+# sort users by by their 90% cutoff value
+# compute the number of users at each cutoff
+# and then the cumulative fraction of users satisfied at each cutoff
+# also, add a 'threshold' column and rename cutoff_90 to cutoff, which will be a useful label for plotting
+percent_satisfied_at_90 <- user_cutoffs %>%
+  group_by(cutoff_90) %>%
+  summarize(num_users = n()) %>%
+  arrange(cutoff_90) %>%
+  mutate(frac_satisfied = cumsum(num_users) / sum(num_users),
+         threshold = '90%') %>%
+  rename(cutoff = cutoff_90)
+
+# repeat this for the 100% cutoff value
+percent_satisfied_at_100 <- user_cutoffs %>%
+  group_by(cutoff_100) %>%
+  summarize(num_users = n()) %>%
+  arrange(cutoff_100) %>%
+  mutate(frac_satisfied = cumsum(num_users) / sum(num_users),
+         threshold = '100%') %>%
+  rename(cutoff = cutoff_100)
+
+# combine the two results for easy plotting
+plot_data <- rbind(percent_satisfied_at_90, percent_satisfied_at_100)
+ggplot(plot_data, aes(x = cutoff, y = frac_satisfied, color = threshold, linetype = threshold)) +
+  geom_line() +
+  xlab('Inventory size') +
+  ylab('Percent of users satisfied') +
+  scale_x_continuous(label = comma) +
+  scale_y_continuous(label = percent) +
+  theme(legend.position = c(0.8, 0.2),
+        legend.title = element_blank(),
+        legend.background = element_blank())
+ggsave('satisfaction_curve.pdf', width = 4, height = 4)
+
+# alternatively, we could have kept the tables separate
+# and called geom_line() twice with different "data = " arguments
+
+# note: this is a shortcut to get straight from user_cutoffs to the plot
+# it directly computes the CDF from the user_cutoffs table
+# but i wouldn't expect most students to know about this function
+# and it's pedagogicaly useful to think about how to compute the cdf
+# ggplot(user_cutoffs, aes(x = cutoff_100)) +
+#  stat_ecdf()
+```
+

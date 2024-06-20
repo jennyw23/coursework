@@ -1,0 +1,150 @@
+### SHIMMY ####
+
+
+
+
+library(scales)
+library(tidyverse)
+library(knitr)
+# set plot theme
+theme_set(theme_bw())
+```
+
+# Load and preview data
+
+Read data from the `ratings.csv` file
+```{r load-data}
+ratings <- read_csv('ratings.csv',
+                    col_names = c('user_id','movie_id','rating','timestamp'))
+```
+
+Loaded `r format(object.size(ratings), units="Mb")` of ratings data, containing `r format(nrow(ratings), big.mark = ",")` ratings. Here's a preview:
+```{r preview-data}
+head(ratings) %>% kable()
+```
+
+# Summary statistics
+
+```{r dist-ratings}
+# plot the distribution of rating values https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=26
+ratings |>
+    ggplot(aes(x=rating)) +
+    geom_histogram(bins = 10) +
+    scale_y_continuous(label=comma)
+```
+
+## Per-movie stats
+
+```{r aggregate-by-movie}
+# aggregate ratings by movie, computing mean rating and number of ratings
+# hint: use the n() function for easy counting within a group
+ratings |>
+    group_by(movie_id) |>
+    summarize(mean_rating=mean(rating), num_ratings=n())
+```
+
+```{r dist-movie-popularity}
+# plot distribution of movie popularity (= number of ratings the movie received)
+# hint: try scale_x_log10() for a logarithmic x axis
+ratings |>
+    group_by(movie_id) |>
+    summarize(num_ratings=n()) |>
+    ggplot(aes(x=num_ratings)) +
+    geom_histogram() +
+    scale_x_log10()
+```
+
+```{r dist-mean-ratings-by-movie}
+# plot distribution of mean ratings by movie https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=28
+# hint: try geom_histogram and geom_density
+ratings |>
+    group_by(movie_id) |>
+    summarize(mean_rating=mean(rating)) |>
+    ggplot(aes(x=mean_rating)) +
+    geom_density()
+```
+
+```{r cdf-movie-pop}
+# rank movies by popularity (number of ratings) and compute the cdf, or fraction of all views covered by the top-k movies https://speakerdeck.com/jhofman/modeling-social-data-lecture-2-introduction-to-counting?slide=30
+# hint: use dplyr's rank and arrange functions, and the base R sum and cumsum functions
+# store the result in a new data frame so you can use it in creating figure 2 from the paper below
+# plot the CDF of movie popularity
+movie_cum_popularity <- ratings |>
+  group_by(movie_id) |>
+  summarize(num_ratings=n()) |>
+  arrange(desc(num_ratings)) |>
+  mutate(rank=row_number(), cum_popularity=cumsum(num_ratings) / sum(num_ratings))
+movie_cum_popularity |>
+  ggplot(aes(x=rank, y=cum_popularity)) +
+  geom_line() +
+  geom_vline(aes(xintercept = 3000), linetype = "dotted") +
+  labs(x="Rank", y="Cumulative Popularity") +
+  scale_y_continuous(n.breaks = 6)
+
+
+```
+
+
+# Per-user stats
+
+```{r aggregate-by-user}
+# aggregate ratings by user, computing mean and number of ratings
+ratings |>
+  group_by(user_id) |>
+  summarize(mean_rating=mean(rating), num_ratings=n())
+```
+
+```{r dist-user-activity}
+# plot distribution of user activity (= number of ratings the user made)
+# hint: try a log scale here
+ratings |>
+  group_by(user_id) |>
+  summarize(mean_rating=mean(rating), num_ratings=n()) |>
+  ggplot(aes(x=num_ratings)) +
+  geom_histogram() +
+  scale_x_log10()
+```
+
+# Anatomy of the long tail
+
+```{r long-tail}
+# generate the equivalent of figure 2a of this paper:
+# note: don't worry about the "null model" lines
+# just do the solid lines and dotted line (optional)
+# https://5harad.com/papers/long_tail.pdf
+# Specifically, for the subset of users who rated at least 10 movies,
+# produce a plot that shows the fraction of users satisfied (vertical
+# axis) as a function of inventory size (horizontal axis). We will
+# define "satisfied" as follows: an individual user is satisfied p% of
+# the time at inventory of size k if at least p% of the movies they
+# rated are contained in the top k most popular movies. As in the
+# paper, produce one curve for the 100% user satisfaction level and
+# another for 90%---do not, however, bother implementing the null
+# model (shown in the dashed lines).
+ratings_satisfy_100 <- ratings |>
+  group_by(user_id) |>
+  mutate(user_ratings=n()) |>
+  filter(user_ratings >= 10) |>
+  inner_join(movie_cum_popularity, by = 'movie_id') |>
+  summarize(inventory = max(rank)) |>
+  group_by(inventory) |>
+  summarize(num_people = n()) |>
+  arrange(inventory) |>
+  mutate(cum_satisfaction_100=cumsum(num_people) / sum(num_people)) 
+ratings |>
+  group_by(user_id) |>
+  mutate(user_ratings=n()) |>
+  filter(user_ratings >= 10) |>
+  inner_join(movie_cum_popularity, by = 'movie_id') |>
+  summarize(inventory = ceiling(quantile(rank, 0.9))) |>
+  group_by(inventory) |>
+  summarize(num_people = n()) |>
+  arrange(inventory) |>
+  mutate(cum_satisfaction_90=cumsum(num_people) / sum(num_people)) |>
+  full_join(ratings_satisfy_100, by="inventory") |> 
+  pivot_longer(cols=starts_with("cum_satis"), names_to = "satisfy_type", values_to = "percentage", values_drop_na=T) |>
+  ggplot(aes(x=inventory, y=percentage, color=satisfy_type)) +
+  geom_line() +
+  geom_vline(aes(xintercept = 3000), linetype = "dotted") +
+  labs(x="Inventory Size", y="Percent of Users Satisfied") +
+  scale_y_continuous(n.breaks=6)

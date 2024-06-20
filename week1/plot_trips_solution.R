@@ -99,6 +99,8 @@ weather %>%
   ggplot(aes(x = ymd, y = temp, color = max_min)) + 
   geom_point()
 
+
+
 ########################################
 # plot trip and weather data
 ########################################
